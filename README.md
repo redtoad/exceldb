@@ -13,3 +13,8 @@ TODOs
 ### 0.8.0 (tbd)
 
 * Initial release.
+
+## License
+
+This program is published under the terms of the MIT License.
+
