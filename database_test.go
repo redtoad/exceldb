@@ -25,6 +25,11 @@ func Test_LoadFromExcel(t *testing.T) {
 			"example/Book1.xlsx",
 			nil,
 		},
+		{
+			"fails for empty file",
+			"tests/empty.xlsx",
+			exceldb.ErrNoMoreRowsFound,
+		},
 	}
 
 	for _, tc := range tests {
