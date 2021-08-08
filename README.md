@@ -7,7 +7,7 @@ exceldb is a pure Go library importing XLSX files directly into an SQLite databa
 
 ## Changes
 
-### 0.8.0 (tbd)
+### 0.8.0 (2021-08-08)
 
 * Initial release.
 
