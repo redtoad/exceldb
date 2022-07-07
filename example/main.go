@@ -14,6 +14,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer db.Close()
 
 	rows, err := db.Query(`SELECT 
 	strftime("%m-%Y", "Date") as 'month-year',
