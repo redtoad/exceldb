@@ -18,6 +18,7 @@ const (
 	FormatText   = 1
 	FormatDate   = 2
 	FormatNumber = 3
+	FormatFloat  = 4
 )
 
 const InMemoryDb = "file::memory:?cache=shared"
@@ -26,16 +27,23 @@ const InMemoryDb = "file::memory:?cache=shared"
 // Go native data type.
 type Converter func(val string) (interface{}, error)
 
+// KeepAsIs is a Converter function which will not alter the received string value.
+func KeepAsIs(val string) (interface{}, error) {
+	return val, nil
+}
+
 // Column describes all values in a column in an Excel sheet.
 type Column struct {
 	// Name of the column (usually contained in the first row)
 	Name string
 	// Column format (e.g. FormatNumber)
 	Format int
-	// Converter function to convert cell content to native value
+	// Converter function to convert cell content (string) to native value (Go type)
 	Func Converter
 }
 
+// DateColum returns a Column with a Converter function parsing date strings using
+// dateFormat (as used by time.Parse()).
 func DateColum(name string, dateFormat string) Column {
 	return Column{
 		Name:   name,
@@ -109,8 +117,8 @@ func GuessColumnFormats(fp *excelize.File, sheet string) ([]Column, error) {
 
 // LoadFromExcel will load all rows from the first sheet in the Excel workbook
 // into a newly created SQLite database. You may specify how data in specific
-// columns is interpreted by supplying Column definitons. If you don't all will
-// be text.
+// columns is interpreted by supplying Column definitons. For those you don't,
+// they will be treated as TEXT.
 func LoadFromExcel(path string, dsn string, options ...Column) (*sql.DB, error) {
 
 	fp, err := excelize.OpenFile(path)
@@ -135,21 +143,16 @@ func LoadFromExcel(path string, dsn string, options ...Column) (*sql.DB, error) 
 		return nil, err
 	}
 
-	// maps converter functions to columns, so we can convert
-	// string to native types later
-	converters := make(map[int]Converter)
-
-	columns, err := GuessColumnFormats(fp, sheet)
-	if err != nil {
-		return nil, err
-	}
-	for i, col := range columns {
+	columns := make([]Column, len(headers))
+	for i, headerLabel := range headers {
+		columns[i] = Column{
+			Name:   headerLabel,
+			Format: FormatText,
+			Func:   KeepAsIs,
+		}
 		for _, option := range options {
-			if col.Name == option.Name {
+			if headerLabel == option.Name {
 				columns[i] = option
-				if option.Func != nil {
-					converters[i] = option.Func
-				}
 			}
 		}
 	}
@@ -158,7 +161,10 @@ func LoadFromExcel(path string, dsn string, options ...Column) (*sql.DB, error) 
 	for i, col := range columns {
 		switch col.Format {
 		case FormatNumber:
+		case FormatFloat:
 			columnSql[i] = fmt.Sprintf(`"%s" REAL`, col.Name)
+			break
+		// also applies to FormatDate
 		default:
 			columnSql[i] = fmt.Sprintf(`"%s" TEXT`, col.Name)
 		}
@@ -175,6 +181,17 @@ func LoadFromExcel(path string, dsn string, options ...Column) (*sql.DB, error) 
 	}
 
 	// import all rows one after the other
+	fields := make([]string, len(headers))
+	for i, hdr := range headers {
+		// We need to escape headers with quotes ("s) in case they contain
+		// spaces or reserved keywords.
+		fields[i] = fmt.Sprintf(`"%s"`, hdr)
+	}
+
+	placeholders := make([]string, len(headers))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
 
 	for iter.Next() {
 
@@ -183,33 +200,21 @@ func LoadFromExcel(path string, dsn string, options ...Column) (*sql.DB, error) 
 			return nil, err
 		}
 
-		// we need to escape headers with "xxx" in case they contain
-		// spaces or reserved keywords
-		columns := make([]string, len(headers))
-		for i, hdr := range headers {
-			columns[i] = fmt.Sprintf(`"%s"`, hdr)
-		}
-
-		placeholders := make([]string, len(headers))
-		for i := range placeholders {
-			placeholders[i] = "?"
+		// Skip empty rows
+		if len(cells) == 0 {
+			continue
 		}
 
 		stmt := fmt.Sprintf(`INSERT INTO data (%s) VALUES (%s);`,
-			strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+			strings.Join(fields, ", "), strings.Join(placeholders, ", "))
 
-		// we need to convert []string to []interface{} in order
-		// to use it in db.Exec()
+		// We need to convert []string to []interface{} in order to use it in db.Exec().
 		values := make([]interface{}, len(headers))
+
 		for i, v := range cells {
-			if converter, ok := converters[i]; ok {
-				converted, err := converter(v)
-				if err != nil {
-					return nil, err
-				}
-				values[i] = converted
-			} else {
-				values[i] = v
+			converter := columns[i].Func
+			if values[i], err = converter(v); err != nil {
+				return nil, err
 			}
 		}
 
