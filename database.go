@@ -21,7 +21,7 @@ const (
 	FormatFloat  = 4
 )
 
-const InMemoryDb = "file::memory:?cache=shared"
+const InMemoryDb = "file::memory:" //?cache=shared"
 
 // Converter is a function to convert a cell value from string to a
 // Go native data type.
@@ -52,67 +52,6 @@ func DateColum(name string, dateFormat string) Column {
 			return time.Parse(dateFormat, val)
 		},
 	}
-}
-
-// GuessColumnFormats will return a list of columns based on the format of the
-// cells in the second row of the Excel sheet. Note that we assume that the first
-// row contains headers!
-func GuessColumnFormats(fp *excelize.File, sheet string) ([]Column, error) {
-
-	iter, err := fp.Rows(sheet)
-	if err != nil {
-		return nil, err
-	}
-
-	if !iter.Next() {
-		return nil, ErrNoMoreRowsFound
-	}
-
-	headers, err := iter.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	columns := make([]Column, len(headers))
-
-	// guess data format from second row
-	for col, header := range headers {
-
-		//// lookup data in row two
-		//cellAddr, err := excelize.CoordinatesToCellName(col+1, 2)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//
-		//// TODO return error if cell does not exist
-		//value, err := fp.GetCellValue(sheet, cellAddr)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//
-		//// Note to future self: GetCellStyle() refers to styles
-		//// in fp.Styles.CellXfs.Xf[style] which contains ...
-		//style, err := fp.GetCellStyle(sheet, cellAddr)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//
-		//fmt.Printf("header %d: %v (style: %v; example value: %v)\n",
-		//	col, header, style, value)
-		//fmt.Printf("CellXfs.Xf[%d].NumFmtId=%d\n", style, *fp.Styles.CellXfs.Xf[style].NumFmtID)
-		//for i, format := range fp.Styles.NumFmts.NumFmt {
-		//	fmt.Printf("format %d: id=%d code=%s\n", i, format.NumFmtID, format.FormatCode)
-		//}
-
-		columns[col] = Column{
-			Name:   header,
-			Format: FormatText, // FIXME use correct format
-			Func:   nil,
-		}
-
-	}
-
-	return columns, nil
 }
 
 // LoadFromExcel will load all rows from the first sheet in the Excel workbook
@@ -175,8 +114,14 @@ func LoadFromExcel(path string, dsn string, options ...Column) (*sql.DB, error) 
 		return nil, err
 	}
 
-	tableSql := fmt.Sprintf("CREATE TABLE data (%s);", strings.Join(columnSql, ","))
-	if _, err := db.Exec(tableSql); err != nil {
+	tableName := "data"
+	dropTableSql := fmt.Sprintf("DROP TABLE IF EXISTS %s;", tableName)
+	if _, err := db.Exec(dropTableSql); err != nil {
+		return nil, err
+	}
+
+	createTableSql := fmt.Sprintf("CREATE TABLE %s (%s);", tableName, strings.Join(columnSql, ","))
+	if _, err := db.Exec(createTableSql); err != nil {
 		return nil, err
 	}
 
